@@ -348,6 +348,117 @@ export async function renderMarkdown(markupContent: string): Promise<string> {
 }
 
 /**
+ * Gets the parent folder ID of a note.
+ * @param noteId - The note ID to query.
+ * @returns The parent folder ID or null on error.
+ */
+export async function getNoteFolderId(noteId: string): Promise<string | null> {
+  try {
+    const note = await joplin.data.get(["notes", noteId], {
+      fields: ["parent_id"],
+    });
+    return note.parent_id || null;
+  } catch (err) {
+    console.error("getNoteFolderId error:", err);
+    return null;
+  }
+}
+
+/**
+ * Gets all notes inside a folder (direct children only).
+ * @param folderId - The folder ID.
+ * @param fields - Optional fields array (default: ["id", "title", "body"]).
+ * @returns Array of note objects.
+ */
+export async function getNotesInFolder(
+  folderId: string,
+  fields: string[] = ["id", "title", "body"],
+): Promise<any[]> {
+  try {
+    const result = await joplin.data.get(["folders", folderId, "notes"], {
+      fields: fields.join(","),
+    });
+    return result.items || [];
+  } catch (err) {
+    console.error("getNotesInFolder error:", err);
+    return [];
+  }
+}
+
+/**
+ * Gets the sub-folders of a given folder.
+ * @param folderId - The parent folder ID (use empty string for root).
+ * @returns Array of folder objects with id, title, parent_id.
+ */
+export async function getSubFolders(
+  folderId: string,
+): Promise<any[]> {
+  try {
+    const allFolders = await joplin.data.get(["folders"], {
+      fields: "id,title,parent_id",
+    });
+    return (allFolders.items || []).filter(
+      (f: any) => f.parent_id === folderId,
+    );
+  } catch (err) {
+    console.error("getSubFolders error:", err);
+    return [];
+  }
+}
+
+/**
+ * Recursively collects all folder IDs (including sub-folders).
+ * @param folderId - The starting folder ID.
+ * @returns Array of folder IDs including the starting folder.
+ */
+export async function getAllFolderIdsRecursive(
+  folderId: string,
+): Promise<string[]> {
+  const ids: string[] = [folderId];
+  try {
+    const subFolders = await getSubFolders(folderId);
+    for (const sub of subFolders) {
+      const childIds = await getAllFolderIdsRecursive(sub.id);
+      ids.push(...childIds);
+    }
+  } catch (err) {
+    console.error("getAllFolderIdsRecursive error:", err);
+  }
+  return ids;
+}
+
+/**
+ * Checks if a folder (or any of its ancestors) is encrypted by
+ * traversing parent chain.
+ * @param folderId - The folder ID to check.
+ * @returns True if folder or any parent is encrypted.
+ */
+export async function isFolderOrParentEncrypted(
+  folderId: string,
+  userDataKey: string = "secureNotes.encrypted",
+): Promise<boolean> {
+  try {
+    const state = await joplin.data.userDataGet(
+      2, // ModelType.Folder
+      folderId,
+      userDataKey,
+    );
+    if (state && (state as any).encrypted) return true;
+
+    // Check parent chain
+    const folder = await joplin.data.get(["folders", folderId], {
+      fields: ["parent_id"],
+    });
+    if (folder && folder.parent_id && folder.parent_id !== "") {
+      return await isFolderOrParentEncrypted(folder.parent_id, userDataKey);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Referesh the view by opening temp note and shifting back
  * to original note.
  * @param noteId - Markdown RAW text.

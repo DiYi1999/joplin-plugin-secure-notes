@@ -19,7 +19,7 @@ async function shakeInput(input, placeholderMsg) {
   input.focus();
 }
 
-// Password handle function
+// Unlock for editing function
 async function handleSubmit() {
   const csID = document.getElementById("data-contentscript-id").innerText;
   const input = document.getElementById("md-lock-input");
@@ -31,23 +31,29 @@ async function handleSubmit() {
     return;
   }
 
-  const decryptionStatus = await webviewApi.postMessage(csID, {
-    type: "password",
+  // Show unlocking state
+  const btn = document.getElementById("md-lock-btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Unlocking...";
+  }
+
+  const result = await webviewApi.postMessage(csID, {
+    type: "unlockAndEdit",
     msg: password,
   });
 
-  if (decryptionStatus.type === "error") {
-    await shakeInput(input, decryptionStatus.msg);
+  if (result.type === "error") {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Unlock";
+    }
+    await shakeInput(input, result.msg);
     return;
   }
 
-  const mdLock = document.getElementById("md-lock");
-  const mdUnlock = document.getElementById("md-unlock");
-  const mdUnlockContent = document.getElementById("md-unlock-content");
-
-  mdLock.style.display = "none";
-  mdUnlock.style.display = "flex";
-  mdUnlockContent.innerHTML = decryptionStatus.msg;
+  // Success — note will be refreshed automatically, no need to update UI
+  logger("Note unlocked for editing");
 }
 
 // Initializtion
@@ -69,9 +75,42 @@ async function init() {
     if (snMd) snMd.style.display = "flex";
     if (input) {
       input.value = "";
-      input.placeholder = "Enter Password to View Note";
+      input.placeholder = "Enter Password to Unlock & Edit";
       input.focus();
     }
+
+    // Try biometric unlock silently after render
+    setTimeout(async () => {
+      try {
+        const csID = document.getElementById("data-contentscript-id");
+        if (!csID) return;
+        const btn = document.getElementById("md-lock-btn");
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Unlocking...";
+        }
+        const result = await webviewApi.postMessage(csID.innerText, {
+          type: "biometricUnlock",
+        });
+        if (result && result.type === "success") {
+          // Note body decrypted on disk, note view will refresh
+          logger("Biometric unlock successful");
+        } else {
+          // Fall back to password input
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "Unlock & Edit";
+          }
+        }
+      } catch (e) {
+        // Biometric not available — silently fall back to password input
+        const btn = document.getElementById("md-lock-btn");
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Unlock & Edit";
+        }
+      }
+    }, 300);
   }
 }
 

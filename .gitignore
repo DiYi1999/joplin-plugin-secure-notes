@@ -1,3 +1,11 @@
 dist/
 node_modules/
 publish/
+.omo/
+node_modules/
+.mcp.json
+.gitignore
+需求.md
+logs/.21bd32e9b8de4e2eda4210415ecbd474dbb5b61d-audit.json
+logs/mcp-puppeteer-2026-06-08.log
+.gitignore
