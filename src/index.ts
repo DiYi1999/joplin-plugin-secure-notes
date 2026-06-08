@@ -27,6 +27,7 @@ import {
   hasTag,
   showEncryptionDialog,
   showDecryptionDialog,
+  showDecryptionDialogWithBiometrics,
   refreshNoteView,
 } from "./utils";
 import {
@@ -35,6 +36,10 @@ import {
   encryptData,
   decryptData,
 } from "./encryption";
+import {
+  isBiometricsAvailable,
+  authenticateWithBiometrics,
+} from "./biometrics";
 import { createLogger } from "./pluginLogger";
 
 /** Global constants */
@@ -48,6 +53,7 @@ export const SETTINGS_SECTION = {
 export const SETTINGS_MAIN = {
   KEY_SIZE: `${SETTINGS_SECTION.MAIN}.bitSize`,
   AES_MODE: `${SETTINGS_SECTION.MAIN}.cipherCategory`,
+  USE_BIOMETRICS: `${SETTINGS_SECTION.MAIN}.useBiometrics`,
 };
 
 export const INTERACTIONS = {
@@ -70,6 +76,7 @@ let encryptionDialogId: string | null = null;
 let decryptionDialogId: string | null = null;
 let LegacyNoteDialogId: string | null = null;
 let lockedTagId: string | null = null;
+let useBiometrics: boolean = false;
 let aesOptions: AesOptions = {
   KeySize: 256,
   AesMode: "AES-GCM",
@@ -88,6 +95,9 @@ joplin.plugins.register({
       label: "Secure Notes",
       iconName: "fas fa-user-shield",
     });
+
+    // Check if biometrics is available on this device
+    const bioAvailable = await isBiometricsAvailable();
 
     // Register plugin settings
     await joplin.settings.registerSettings({
@@ -116,6 +126,17 @@ joplin.plugins.register({
           "AES-GCM": "GCM (Recommended)",
         },
       },
+      ...(bioAvailable && {
+        [SETTINGS_MAIN.USE_BIOMETRICS]: {
+          value: false,
+          type: SettingItemType.Bool,
+          section: SETTINGS_SECTION.MAIN,
+          public: true,
+          label: "Use Biometrics to Unlock Notes (Beta)",
+          description:
+            "Enable fingerprint or face recognition to quickly unlock encrypted notes on mobile devices",
+        },
+      }),
     });
 
     // Register commands
@@ -212,15 +233,23 @@ joplin.plugins.register({
  * Update global vars based on settings change.
  */
 async function updateSettings() {
-  const pluginSettings = await joplin.settings.values([
+  const settingsToFetch = [
     SETTINGS_MAIN.KEY_SIZE,
     SETTINGS_MAIN.AES_MODE,
-  ]);
+    ...(await isBiometricsAvailable() ? [SETTINGS_MAIN.USE_BIOMETRICS] : []),
+  ];
+
+  const pluginSettings = await joplin.settings.values(settingsToFetch);
 
   aesOptions = {
     KeySize: pluginSettings[SETTINGS_MAIN.KEY_SIZE] as AesOptions["KeySize"],
     AesMode: pluginSettings[SETTINGS_MAIN.AES_MODE] as AesOptions["AesMode"],
   };
+
+  if (await isBiometricsAvailable()) {
+    useBiometrics = pluginSettings[SETTINGS_MAIN.USE_BIOMETRICS] ?? false;
+    logger.info("Biometrics enabled:", useBiometrics);
+  }
 
   logger.info("Settings:", aesOptions.KeySize, aesOptions.AesMode);
 }
@@ -353,7 +382,11 @@ export async function decryptNote(note: any) {
   let msg = "Enter password to Decrypt";
   // TODO: This is dangerous, limit it to 3 counts.
   while (true) {
-    const passwd = await showDecryptionDialog(decryptionDialogId, msg);
+    // Use biometric-enhanced dialog if available and enabled
+    const passwd = useBiometrics
+      ? await showDecryptionDialogWithBiometrics(decryptionDialogId, msg)
+      : await showDecryptionDialog(decryptionDialogId, msg);
+
     if (!passwd) {
       logger.debug("Password dialog cancelled");
       return;
@@ -378,7 +411,7 @@ export async function decryptNote(note: any) {
         msg = "Incorrect password, try again";
       } else {
         logger.info("Decryption failed: ", error);
-        showToast("Decryption faild", ToastType.Error);
+        showToast("Decryption failed", ToastType.Error);
         return;
       }
     }
@@ -402,7 +435,10 @@ export async function decryptOldNote(note: any) {
   let msg = "Enter password to Decrypt";
 
   while (true) {
-    const passwd = await showDecryptionDialog(decryptionDialogId, msg);
+    const passwd = useBiometrics
+      ? await showDecryptionDialogWithBiometrics(decryptionDialogId, msg)
+      : await showDecryptionDialog(decryptionDialogId, msg);
+
     if (!passwd) {
       logger.debug("Password dialog cancelled");
       return;
@@ -425,7 +461,7 @@ export async function decryptOldNote(note: any) {
         msg = "Incorrect password, try again";
       } else {
         logger.info("Decryption failed: ", error);
-        showToast("Decryption faild", ToastType.Error);
+        showToast("Decryption failed", ToastType.Error);
         return;
       }
     }
