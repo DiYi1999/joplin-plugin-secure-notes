@@ -9,7 +9,11 @@ import joplin from "api";
 import { ToastType } from "api/types";
 import { AesOptions } from "./encryption";
 import { PLUGIN_ID } from "./index";
+import { authenticateWithBiometrics } from "./biometrics";
+import { createLogger } from "./pluginLogger";
 import MarkdownIt = require("markdown-it");
+
+const logger = createLogger("[UtilsModule]", "DEBUG");
 
 /**
  * Display a toast message
@@ -145,6 +149,46 @@ export async function showDecryptionDialog(
     }
     return password;
   }
+}
+
+/**
+ * Shows a password input dialog with biometric authentication fallback.
+ * Attempts to authenticate using biometrics first, then falls back to password.
+ * @param passwdDialogID - Password dialog instance to use
+ * @param msg - Message to display in the dialog
+ * @returns Password string or empty string if biometric auth succeeded, null if cancelled
+ */
+export async function showDecryptionDialogWithBiometrics(
+  passwdDialogID: any,
+  msg: string,
+): Promise<string | null> {
+  try {
+    logger.info("Attempting biometric authentication");
+    const bioSuccess = await authenticateWithBiometrics(
+      "Verify your identity to unlock encrypted notes",
+    );
+
+    if (bioSuccess) {
+      logger.info("Biometric authentication successful, unlocking note");
+      await showToast("Unlocked with biometrics", ToastType.Success);
+      return ""; // Return empty string to indicate biometric success
+    }
+
+    logger.info("Biometric authentication failed or cancelled, falling back to password");
+    await showToast(
+      "Biometric authentication failed, please enter password",
+      ToastType.Info,
+    );
+  } catch (error) {
+    logger.warn("Error during biometric authentication:", error);
+    await showToast(
+      "Biometric authentication unavailable, please enter password",
+      ToastType.Info,
+    );
+  }
+
+  // Fallback to password dialog
+  return showDecryptionDialog(passwdDialogID, msg);
 }
 
 /**
